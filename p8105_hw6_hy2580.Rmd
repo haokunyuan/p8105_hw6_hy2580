@@ -104,32 +104,36 @@ Propose a regression model for birthweight. This model may be based on a hypothe
 
 ```{r}
 birthweight = read_csv("./data/birthweight.csv") 
-cor(birthweight)
-pairs(birthweight)
+#removed collinearlity
 proposed_data = birthweight %>% 
-  select(-pnumlbw, - pnumsga, -ppbmi)
-# -mrace, -malform, -menarche, -parity,-wtgain
-summary(lm(bwt ~ .,proposed_data)) #%>% broom::tidy()
+  select(-pnumlbw, -pnumsga, -ppbmi)
+#use stepwise method to select variable
 step(lm(bwt ~ .,proposed_data),direction = "both")
-plot(proposed_data$mheight, proposed_data$bwt)
+
 reg_proposed = lm(bwt ~ .,proposed_data)
+
+summary(reg_proposed)
+
+proposed_data %>% 
+  modelr::add_residuals(reg_proposed) %>% 
+  modelr::add_predictions(reg_proposed) %>% 
+  ggplot(aes(pred,resid)) + 
+  geom_point(alpha = 0.5)
 ```
+
+I first check the collinearlity, and removed the variables that I found to have high collinearlity (>70%), and then used stepwise function select variable.
+
+
 
 Compare your model to two others:
 
 One using length at birth and gestational age as predictors (main effects only)
 
 ```{r}
+reg_1 = lm(bwt~blength+gaweeks, birthweight)
 
-hist(birthweight$bwt)
-
-reg_1=lm(bwt~blength+gaweeks, birthweight)
-
-anova(reg)
-summary(reg)
 ```
 
-we first want to see the distribution of y and it is normal distributed.
 
 One using head circumference, length, sex, and all interactions (including the three-way interaction) between these
 
@@ -161,5 +165,4 @@ cv_df %>%
 
 ```
 
-Note that although we expect your model to be reasonable, model building itself is not a main idea of the course and we don’t necessarily expect your model to be “optimal”.
-
+the rmse for model1 and model 2 is lower than that of the proposed model which indicate proposed model is a better fit.
