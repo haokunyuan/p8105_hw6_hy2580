@@ -1,0 +1,165 @@
+---
+title: "p8105_hw6_hy2580"
+author: "haokun yuan"
+date: "11/19/2018"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(purrr)
+library(broom)
+library(modelr)
+```
+
+### Problem 1
+
+The Washington Post has gathered data on homicides in 50 large U.S. cities and made the data available through a GitHub repository here. You can read their accompanying article here.
+
+Create a city_state variable (e.g. “Baltimore, MD”), and a binary variable indicating whether the homicide is solved. Omit cities Dallas, TX; Phoenix, AZ; and Kansas City, MO – these don’t report victim race. Also omit Tulsa, AL – this is a data entry mistake. Modifiy victim_race to have categories white and non-white, with white as the reference category. Be sure that victim_age is numeric.
+
+```{r, message=FALSE}
+homicide_data = read_csv("./data/homicide-data.csv") %>% 
+  janitor::clean_names() %>% 
+  mutate(city_state = paste(city, state, sep = ", ")) %>% 
+  filter(city_state != "Dallas, TX" & city_state != "Phoenix, AZ" & city_state != "Kansas City, MO" & city_state != "Tulsa, AL") %>% 
+  mutate(victim_race = ifelse(victim_race == "White", "white", "non_white"),
+         victim_race = fct_relevel(victim_race, "white"),
+         victim_age = as.numeric(victim_age),
+         resolved = as.numeric(disposition == "Closed by arrest"),
+         unresolved = as.numeric(disposition != "Closed by arrest")) %>%
+  filter(victim_age != "NA")
+
+```
+
+For the city of Baltimore, MD, use the glm function to fit a logistic regression with resolved vs unresolved as the outcome and victim age, sex and race (as just defined) as predictors. Save the output of glm as an R object; apply the broom::tidy to this object; and obtain the estimate and confidence interval of the adjusted odds ratio for solving homicides comparing black victims to white victims keeping all other variables fixed.
+
+```{r}
+baltimore_df = homicide_data %>% 
+  filter(city_state == "Baltimore, MD") %>% 
+  select(resolved, victim_age, victim_race, victim_sex)
+
+fit_logistic = baltimore_df %>% 
+  glm(resolved ~ victim_age + victim_race + victim_sex, data = ., family = binomial())
+
+baltimore_fit = fit_logistic %>% 
+  broom::tidy() %>% 
+  mutate(OR = exp(estimate)) %>%
+  select(term, log_OR = estimate, OR, p.value) %>% 
+  filter(term == "victim_racenon_white")
+
+CI = exp(confint(fit_logistic)) %>% broom::tidy() %>% 
+  rename(term = .rownames, conf_low = X2.5.., conf_high = X97.5..)
+
+left_join(baltimore_fit, CI)
+
+```
+
+
+Now run glm for each of the cities in your dataset, and extract the adjusted odds ratio (and CI) for solving homicides comparing black victims to white victims. Do this within a “tidy” pipeline, making use of purrr::map, list columns, and unnest as necessary to create a dataframe with estimated ORs and CIs for each city.
+
+```{r}
+city_fit = homicide_data %>% 
+  select(city_state, resolved, victim_age, victim_race, victim_sex) %>% 
+  group_by(city_state) %>% 
+  nest() %>% 
+  mutate(models = map(data, ~glm(resolved ~ victim_age + victim_race + victim_sex, data =.x)),
+         parameter = map(models,broom::tidy),
+         parameter2 = map(models, confint),
+         parameter3 = map(parameter2, broom::tidy),
+         parameter4 = map2(parameter3,parameter, ~merge.data.frame(x=.x, y=.y, by.x = ".rownames", by.y = "term"))) %>%
+  select(-parameter,-parameter2,-parameter3) %>% 
+         #map(models, confint)) %>% 
+  unnest(parameter4) %>%
+  mutate(conf_low = X2.5.., conf_high = X97.5..) %>% 
+  mutate(OR = exp(estimate),
+         conf_low = exp(conf_low),
+         conf_high = exp(conf_high),
+         term = .rownames
+         ) %>% 
+  select(city_state, term, OR, conf_low, conf_high) %>% 
+  filter(term == "victim_racenon_white")
+
+city_fit
+
+```
+
+Create a plot that shows the estimated ORs and CIs for each city. Organize cities according to estimated OR, and comment on the plot.
+
+```{r}
+city_fit %>% 
+  mutate(city_state = fct_reorder(city_state, desc(OR))) %>% 
+  ggplot(aes(city_state, OR)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = conf_low, ymax = conf_high))
+  
+```
+
+
+###Problem 2
+
+
+Propose a regression model for birthweight. This model may be based on a hypothesized structure for the factors that underly birthweight, on a data-driven model-building process, or a combination of the two. Describe your modeling process and show a plot of model residuals against fitted values – use add_predictions and add_residuals in making this plot.
+
+```{r}
+birthweight = read_csv("./data/birthweight.csv") 
+cor(birthweight)
+pairs(birthweight)
+proposed_data = birthweight %>% 
+  select(-pnumlbw, - pnumsga, -ppbmi)
+# -mrace, -malform, -menarche, -parity,-wtgain
+summary(lm(bwt ~ .,proposed_data)) #%>% broom::tidy()
+step(lm(bwt ~ .,proposed_data),direction = "both")
+plot(proposed_data$mheight, proposed_data$bwt)
+reg_proposed = lm(bwt ~ .,proposed_data)
+```
+
+Compare your model to two others:
+
+One using length at birth and gestational age as predictors (main effects only)
+
+```{r}
+
+hist(birthweight$bwt)
+
+reg_1=lm(bwt~blength+gaweeks, birthweight)
+
+anova(reg)
+summary(reg)
+```
+
+we first want to see the distribution of y and it is normal distributed.
+
+One using head circumference, length, sex, and all interactions (including the three-way interaction) between these
+
+```{r}
+reg_2 = lm(bwt ~ blength + gaweeks + babysex + blength*gaweeks+blength*gaweeks*babysex + blength*gaweeks*babysex + blength*babysex, birthweight) 
+```
+
+Make this comparison in terms of the cross-validated prediction error; use crossv_mc and functions in purrr as appropriate.
+
+```{r}
+cv_df = crossv_mc(birthweight, 100) %>% 
+  mutate(train = map(train, as_tibble),
+         test = map(test, as_tibble))
+cv_df = 
+  cv_df %>% 
+  mutate(proposed_mod = map(train, ~ reg_proposed),
+         mod_1 = map(train, ~reg_1),
+         mod_2 = map(train, ~ reg_2)) %>% 
+  mutate(rmse_proposed    = map2_dbl(proposed_mod, test, ~rmse(model = .x, data = .y)),
+         rmse_1 = map2_dbl(mod_1, test, ~rmse(model = .x, data = .y)),
+         rmse_2 = map2_dbl(mod_2, test, ~rmse(model = .x, data = .y)))
+
+cv_df %>% 
+  select(starts_with("rmse")) %>% 
+  gather(key = model, value = rmse) %>% 
+  mutate(model = str_replace(model, "rmse_", ""),
+         model = fct_inorder(model)) %>% 
+  ggplot(aes(x = model, y = rmse)) + geom_violin()
+
+```
+
+Note that although we expect your model to be reasonable, model building itself is not a main idea of the course and we don’t necessarily expect your model to be “optimal”.
+
