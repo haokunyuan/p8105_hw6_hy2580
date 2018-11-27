@@ -35,7 +35,7 @@ homicide_data = read_csv("./data/homicide-data.csv") %>%
 
 For the city of Baltimore, MD, use the glm function to fit a logistic regression with resolved vs unresolved as the outcome and victim age, sex and race (as just defined) as predictors. Save the output of glm as an R object; apply the broom::tidy to this object; and obtain the estimate and confidence interval of the adjusted odds ratio for solving homicides comparing black victims to white victims keeping all other variables fixed.
 
-```{r}
+```{r, message=FALSE}
 baltimore_df = homicide_data %>% 
   filter(city_state == "Baltimore, MD") %>% 
   select(resolved, victim_age, victim_race, victim_sex)
@@ -59,7 +59,7 @@ left_join(baltimore_fit, CI)
 
 Now run glm for each of the cities in your dataset, and extract the adjusted odds ratio (and CI) for solving homicides comparing black victims to white victims. Do this within a “tidy” pipeline, making use of purrr::map, list columns, and unnest as necessary to create a dataframe with estimated ORs and CIs for each city.
 
-```{r}
+```{r, message=FALSE, warning=FALSE}
 city_fit = homicide_data %>% 
   select(city_state, resolved, victim_age, victim_race, victim_sex) %>% 
   group_by(city_state) %>% 
@@ -70,7 +70,6 @@ city_fit = homicide_data %>%
          parameter3 = map(parameter2, broom::tidy),
          parameter4 = map2(parameter3,parameter, ~merge.data.frame(x=.x, y=.y, by.x = ".rownames", by.y = "term"))) %>%
   select(-parameter,-parameter2,-parameter3) %>% 
-         #map(models, confint)) %>% 
   unnest(parameter4) %>%
   mutate(conf_low = X2.5.., conf_high = X97.5..) %>% 
   mutate(OR = exp(estimate),
@@ -87,12 +86,19 @@ city_fit
 
 Create a plot that shows the estimated ORs and CIs for each city. Organize cities according to estimated OR, and comment on the plot.
 
-```{r}
+```{r, message=FALSE}
 city_fit %>% 
   mutate(city_state = fct_reorder(city_state, desc(OR))) %>% 
   ggplot(aes(city_state, OR)) +
   geom_point() +
-  geom_errorbar(aes(ymin = conf_low, ymax = conf_high))
+  geom_errorbar(aes(ymin = conf_low, ymax = conf_high)) + 
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size = rel(0.8))) + 
+  labs(
+      x = "City",
+      y = "OR",
+      title = "Estimated Odds ratios and CIs of nonwhite victim"
+    )
   
 ```
 
@@ -102,13 +108,16 @@ city_fit %>%
 
 Propose a regression model for birthweight. This model may be based on a hypothesized structure for the factors that underly birthweight, on a data-driven model-building process, or a combination of the two. Describe your modeling process and show a plot of model residuals against fitted values – use add_predictions and add_residuals in making this plot.
 
-```{r}
+```{r, message=FALSE}
 birthweight = read_csv("./data/birthweight.csv") 
 #removed collinearlity
 proposed_data = birthweight %>% 
   select(-pnumlbw, -pnumsga, -ppbmi)
 #use stepwise method to select variable
 step(lm(bwt ~ .,proposed_data),direction = "both")
+
+proposed_data = proposed_data %>% 
+  select(bwt, babysex, bhead, blength, delwt, fincome, gaweeks, menarche, mheight, momage, mrace, parity, ppwt, smoken)
 
 reg_proposed = lm(bwt ~ .,proposed_data)
 
@@ -118,18 +127,22 @@ proposed_data %>%
   modelr::add_residuals(reg_proposed) %>% 
   modelr::add_predictions(reg_proposed) %>% 
   ggplot(aes(pred,resid)) + 
-  geom_point(alpha = 0.5)
+  geom_point(alpha = 0.5) +
+  labs(
+      x = "Fitted Value",
+      y = "Residual",
+      title = "Residual VS. Fitted Value"
+  )
 ```
 
-I first check the collinearlity, and removed the variables that I found to have high collinearlity (>70%), and then used stepwise function select variable.
-
+I first check the collinearlity, and removed the variables that I found to have high collinearlity (>70%), and then used stepwise function select variable. The residual vs. fit plot showed that the regression may not be linear, a tranformation is probability needed.
 
 
 Compare your model to two others:
 
 One using length at birth and gestational age as predictors (main effects only)
 
-```{r}
+```{r, message=FALSE}
 reg_1 = lm(bwt~blength+gaweeks, birthweight)
 
 ```
@@ -137,13 +150,13 @@ reg_1 = lm(bwt~blength+gaweeks, birthweight)
 
 One using head circumference, length, sex, and all interactions (including the three-way interaction) between these
 
-```{r}
+```{r, message=FALSE, warning=FALSE}
 reg_2 = lm(bwt ~ blength + gaweeks + babysex + blength*gaweeks+blength*gaweeks*babysex + blength*gaweeks*babysex + blength*babysex, birthweight) 
 ```
 
 Make this comparison in terms of the cross-validated prediction error; use crossv_mc and functions in purrr as appropriate.
 
-```{r}
+```{r, message=FALSE, warning=FALSE}
 cv_df = crossv_mc(birthweight, 100) %>% 
   mutate(train = map(train, as_tibble),
          test = map(test, as_tibble))
@@ -161,8 +174,13 @@ cv_df %>%
   gather(key = model, value = rmse) %>% 
   mutate(model = str_replace(model, "rmse_", ""),
          model = fct_inorder(model)) %>% 
-  ggplot(aes(x = model, y = rmse)) + geom_violin()
+  ggplot(aes(x = model, y = rmse)) + 
+  geom_violin() +
+  labs(x = "Model",
+       y = "RMSE",
+       title = "RMSE for three models"
+    )
 
 ```
 
-the rmse for model1 and model 2 is lower than that of the proposed model which indicate proposed model is a better fit.
+The rmse for model1 and model 2 is lower than that of the proposed model which indicate proposed model is a better fit.
